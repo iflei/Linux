@@ -59,7 +59,7 @@ int startup(const char* ip, const char* port)
 
 void* do_connect(void* arg)
 {
-	int new_socket = *(int*)arg; //获取参数
+	long long new_socket = (long long)arg; //获取参数
 	char buf[1024];
 	//read write
 	while(1)
@@ -102,7 +102,7 @@ int main(int argc, char* argv[])
 
 	while(1)
 	{	
-		int new_socket = accept(listen_socket, (struct sockaddr*)&remote, &len);
+		long long new_socket = accept(listen_socket, (struct sockaddr*)&remote, &len);
 		if(new_socket < 0)
 		{
 			perror("accept");
@@ -114,7 +114,7 @@ int main(int argc, char* argv[])
 		//创建线程
 		pthread_t tid;
 		int err;
-		if(err = pthread_create(&tid, NULL, do_connect, &new_socket))
+		if(err = pthread_create(&tid, NULL, do_connect, (void*)new_socket))
 		{
 			printf("pthread_create: %s\n",strerror(err));
 			exit(5);
