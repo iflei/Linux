@@ -57,15 +57,19 @@ int main(int argc, char* argv[])
 		return 1;
 	}
 
-	int fds[sizeof(fd_set)*8]; //保存要检测的文件句柄
+	int rfd[sizeof(fd_set)*8]; //保存要检测的读文件句柄
+	int wfd[sizeof(fd_set)*8]; //保存要检测的写文件句柄
 	const int nums = sizeof(fd_set)*8;
 	int i = 0;
 	for(; i < nums; ++i)
-	  fds[i] = -1;  //-1是无效文件句柄
+	{
+		rfd[i] = -1;  //-1是无效文件句柄
+		wfd[i] = -1;
+	}
 
 	int listen_sock = startup(argv[1], atoi(argv[2]));
 	
-	fds[0] = listen_sock; //把listen_sock加入要检测的数组
+	rfd[0] = listen_sock; //把listen_sock加入要检测的数组
 	fd_set rfds; //读文件描述符集
 	fd_set wfds; //写文件描述符集
 	struct sockaddr_in remote;
@@ -79,14 +83,16 @@ int main(int argc, char* argv[])
 
 		for(i = 0; i < nums; ++i) //遍历数组
 		{
-			if(fds[i] == -1)
-			  continue;
+			if(rfd[i] != -1)
+			  FD_SET(rfd[i], &rfds); //添加到rfds
+			if(wfd[i] != -1)
+			  FD_SET(wfd[i], &wfds);
 			
-			//有效的文件句柄
-			FD_SET(fds[i], &rfds); //添加到rfds
-			FD_SET(fds[i], &wfds);
-			if(fds[i] > maxfd)
-				maxfd = fds[i]; //记录最大的文件句柄
+			//记录最大的文件句柄
+			if(rfd[i] > maxfd)
+				maxfd = rfd[i]; 
+			if(wfd[i] > maxfd)
+				maxfd = wfd[i]; 
 		}
 		
 		struct timeval timeout = {3, 0}; //设置3秒超时
@@ -103,12 +109,12 @@ int main(int argc, char* argv[])
 				{
 					for(i = 0; i < nums; ++i) //遍历数组
 					{
-						if(fds[i] == -1)
+						if(rfd[i] == -1 && wfd[i] == -1)
 						  continue;
 
 						//循环时检测是否有新连接
 						//accept就绪
-						if(i == 0 && FD_ISSET(fds[i], &rfds))	
+						if(i == 0 && FD_ISSET(rfd[i], &rfds))	
 						{
 							int conn_sock = accept(listen_sock, (struct sockaddr*)&remote, &len);
 							if(conn_sock < 0)
@@ -120,9 +126,9 @@ int main(int argc, char* argv[])
 							int j = 0;
 							for(; j < nums; ++j) //遍历数组
 							{
-								if(fds[j] == -1) //把conn_sock添加到数组里
+								if(rfd[j] == -1) //把conn_sock添加到数组里
 								{
-									fds[j] = conn_sock;
+									rfd[j] = conn_sock;
 									printf("New Connection! %s:%d\n", inet_ntoa(remote.sin_addr), ntohs(remote.sin_port));
 									break;
 								}
@@ -132,20 +138,35 @@ int main(int argc, char* argv[])
 							  close(conn_sock); //fd_set存不下
 						}
 						//conn_sock读事件就绪
-						else if(i != 0 && FD_ISSET(fds[i], &rfds))
+						else if(i != 0 && FD_ISSET(rfd[i], &rfds))
 						{
 							char buf[1024];
-							ssize_t s = read(fds[i], buf, sizeof(buf)-1);
+							ssize_t s = read(rfd[i], buf, sizeof(buf)-1);
 							if(s > 0)
 							{
 								buf[s] = 0;
 								printf("client# %s\n", buf);
+								//读完后再监测写事件
+								int j = 0;
+								for(; j < nums; ++j) //遍历数组
+								{
+									if(wfd[j] == -1) 
+									{
+										wfd[j] = rfd[i];
+										break;
+									}
+								}
+
+								rfd[i] = -1; //不监测读了
+								if(j == nums)
+								  close(rfd[i]); //无法监测更多的写事件
+
 							}
 							else if(s == 0)
 							{
 								printf("Closed!\n");
-								close(fds[i]);
-								fds[i] = -1;
+								close(rfd[i]);
+								rfd[i] = -1;
 								break;
 							}
 							else
@@ -155,10 +176,12 @@ int main(int argc, char* argv[])
 							}
 						}
 						//conn_sock写事件就绪
-						else if(i != 0 && FD_ISSET(fds[i], &wfds))
+						else if(i != 0 && FD_ISSET(wfd[i], &wfds))
 						{
-							//char* buf = "i am server!";
-							//write(fds[i], buf, strlen(buf));
+							const char* msg = "HTTP/1.1 200 OK \r\n\r\n<html><h1>hello world! </h1></html>\n";
+							write(wfd[i], msg, strlen(msg));
+							wfd[i] = -1;
+							close(wfd[i]);
 						}
 					}
 				}
